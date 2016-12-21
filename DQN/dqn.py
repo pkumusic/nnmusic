@@ -7,7 +7,39 @@ from logger import logger
 import tensorflow as tf
 import argparse
 import numpy as np
-import tensorflow.contrib.learn.python.learn.datasets.mnist
+import cv2
+from utils import show_image
+from collections import deque
+
+IMAGE_SIZE = (84,84)
+REPLAY_MEMORY_SIZE = 1000  # 1000000
+HISTORY_LENGTH = 4
+
+
+def dqn(env_name, gym_dir):
+    env = gym.make(env_name)
+    env.monitor.start(gym_dir, force=True)
+    ob = env.reset()
+    mem = deque(maxlen=REPLAY_MEMORY_SIZE)
+    while True:
+        ob = preprocess_state(ob, debug=False)
+        mem.append(ob)
+        action = predict_action(mem[-4:])
+        ob, reward, done, info = env.step(action)
+        if done:
+            exit()
+
+def preprocess_state(ob, debug=False):
+    ob = cv2.cvtColor(ob, cv2.COLOR_BGR2GRAY)
+    ob = cv2.resize(ob, IMAGE_SIZE)
+    if debug:
+        show_image(ob)
+    return ob
+
+def predict_action(input):
+
+    return 1
+
 
 def gym_test(env_name):
     """
@@ -51,4 +83,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     #gym_test(args.env)
-    tensorflow_test()
+    dqn(args.env, 'tmp')
