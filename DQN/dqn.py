@@ -8,26 +8,67 @@ import tensorflow as tf
 import argparse
 import numpy as np
 import cv2
+import random
 from utils import show_image
-from collections import deque
+from collections import deque, namedtuple
+# Cur_observation, the action gonna take, the reward after taking the action, if it's done after the action
+Memory = namedtuple('Memory', ['ob', 'action', 'reward', 'done']) # ob only contain 1 frame for space efficiency
+Exp    = namedtuple('Exp', ['state', 'action', 'reward', 'done', 'next_state']) # state contain histories as training input
 
 IMAGE_SIZE = (84,84)
 REPLAY_MEMORY_SIZE = 1000  # 1000000
+REPLAY_START_SIZE = 10
 HISTORY_LENGTH = 4
+MINIBATCH_SIZE = 32
+UPDATE_FREQUENCY = 4
 
+random.seed(0)
 
-def dqn(env_name, gym_dir):
+def train_dqn(env_name, gym_dir):
     env = gym.make(env_name)
     env.monitor.start(gym_dir, force=True)
-    ob = env.reset()
+    # Initialization
+    ob, cur_obs = initialize_env(env)
     mem = deque(maxlen=REPLAY_MEMORY_SIZE)
-    while True:
-        ob = preprocess_state(ob, debug=False)
-        mem.append(ob)
-        action = predict_action(mem[-4:])
-        ob, reward, done, info = env.step(action)
+    # Initialize memory with prediction function
+    for i in xrange(REPLAY_START_SIZE):
+        action = predict_action(cur_obs)
+        new_ob, reward, done, info = env.step(action)
+        new_ob = preprocess_state(new_ob, debug=False)
+        cur_obs.append(new_ob)
+        mem.append(Memory(ob, action, reward, done))
+        ob = new_ob
         if done:
-            exit()
+            ob, cur_obs = initialize_env(env)
+
+    while True:
+        for i in xrange(UPDATE_FREQUENCY):
+            action = predict_action(cur_obs)
+            new_ob, reward, done, info = env.step(action)
+            new_ob = preprocess_state(new_ob, debug=False)
+            cur_obs.append(new_ob)
+            mem.append(Memory(ob, action, reward, done))
+            ob = new_ob
+            if done:
+                ob, cur_obs = initialize_env(env)
+        batch = sample(mem, MINIBATCH_SIZE, HISTORY_LENGTH)
+        train_one_step(batch)
+
+def initialize_env(env):
+    """ Initialize a history queue and add first ob to the queue
+    :param env: the environment needs to be reset
+    :return:
+    """
+    cur_obs = deque(maxlen=HISTORY_LENGTH)
+    ob = env.reset()
+    ob = preprocess_state(ob)
+    cur_obs.append(ob)
+    return ob, cur_obs
+
+
+def train_one_step(batch):
+    pass
+
 
 def preprocess_state(ob, debug=False):
     ob = cv2.cvtColor(ob, cv2.COLOR_BGR2GRAY)
@@ -37,9 +78,35 @@ def preprocess_state(ob, debug=False):
     return ob
 
 def predict_action(input):
-
+    # Use the last HISTORY_LENGTH frames to predict the action
     return 1
 
+def sample(mem, batch_size, history_length):
+    """
+    :param mem:
+    :param batch_size:
+    :param history_length:
+    :return: #[[Exp],]
+    """
+    data = []
+    for i in xrange(batch_size):
+        idx = random.randint(0, len(mem) - history_length - 1)
+        samples = [mem[k] for k in xrange(idx, idx+history_length+1)]
+        memory = samples[-2]
+        action, reward, done = memory.action, memory.reward, memory.done
+        def concat(idx):
+            ans = [x.ob for x in samples[idx:idx+history_length]]
+            return np.array(ans)  # 4 * 84 * 84
+        state = concat(0)
+        next_state = concat(1)
+        # Zero filling
+        for j in xrange(0, history_length):
+            if samples[j].done:
+                state[j+1:,:,:] = 0
+                next_state[j:,:,:] = 0
+                break
+        data.append(Exp(state, action, reward, done, next_state))
+    return data
 
 def gym_test(env_name):
     """
@@ -83,4 +150,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     #gym_test(args.env)
-    dqn(args.env, 'tmp')
+    train_dqn(args.env, 'tmp')
