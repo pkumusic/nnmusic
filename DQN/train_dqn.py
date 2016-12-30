@@ -103,8 +103,8 @@ def sample(mem, batch_size, history_length):
         # Zero filling
         for j in xrange(history_length-1, -1, -1):
             if samples[j].done:
-                state[:j+1,:,:] = 0
-                next_state[:j,:,:] = 0
+                state[:,:,:j+1] = 0
+                next_state[:,:,:j] = 0
                 break
         data.append(Exp(state, action, reward, done, next_state))
     return data
