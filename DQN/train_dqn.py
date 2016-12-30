@@ -96,8 +96,8 @@ def sample(mem, batch_size, history_length):
         memory = samples[-2]
         action, reward, done = memory.action, memory.reward, memory.done
         def concat(idx):
-            ans = [x.ob for x in samples[idx:idx+history_length]]
-            return np.array(ans)  # 4 * 84 * 84
+            ans = np.array([x.ob for x in samples[idx:idx+history_length]])
+            return np.dstack(ans)  # 84 * 84 * 4
         state = concat(0)
         next_state = concat(1)
         # Zero filling
