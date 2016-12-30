@@ -31,10 +31,11 @@ def train_dqn(env_name, gym_dir):
     ob, cur_obs = initialize_env(env)
     mem = deque(maxlen=REPLAY_MEMORY_SIZE)
     # Initialize memory with prediction function
-    for i in xrange(REPLAY_START_SIZE):
+    logger.info("Initialize replay memory")
+    for i in tqdm(xrange(REPLAY_START_SIZE)):
         action = predict_action(cur_obs)
         new_ob, reward, done, info = env.step(action)
-        new_ob = preprocess_state(new_ob, debug=False)
+        new_ob = preprocess_state(new_ob)
         cur_obs.append(new_ob)
         mem.append(Memory(ob, action, reward, done))
         ob = new_ob
@@ -45,7 +46,7 @@ def train_dqn(env_name, gym_dir):
         for i in xrange(UPDATE_FREQUENCY):
             action = predict_action(cur_obs)
             new_ob, reward, done, info = env.step(action)
-            new_ob = preprocess_state(new_ob, debug=False)
+            new_ob = preprocess_state(new_ob)
             cur_obs.append(new_ob)
             mem.append(Memory(ob, action, reward, done))
             ob = new_ob
@@ -100,10 +101,10 @@ def sample(mem, batch_size, history_length):
         state = concat(0)
         next_state = concat(1)
         # Zero filling
-        for j in xrange(0, history_length):
+        for j in xrange(history_length-1, -1, -1):
             if samples[j].done:
-                state[j+1:,:,:] = 0
-                next_state[j:,:,:] = 0
+                state[:j+1,:,:] = 0
+                next_state[:j,:,:] = 0
                 break
         data.append(Exp(state, action, reward, done, next_state))
     return data
