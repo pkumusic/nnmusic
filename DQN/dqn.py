@@ -3,19 +3,29 @@
 # Author: Music Li.  yuezhanl@andrew.cmu.edu
 import numpy as np
 import tensorflow as tf
-from train_dqn import STATE_SIZE
 NUM_ACTIONS = 9
+GAMMA = 0.99
+BATCH_SIZE = 32
 
 class DQN():
 
-    def __init__(self):
-        self.state  = tf.placeholder(tf.float32, (None,) + STATE_SIZE, name='state')
+    def __init__(self, state_size):
+        self.state_size = state_size
+        self.state  = tf.placeholder(tf.float32, (None,) + state_size, name='state')
         self.action = tf.placeholder(tf.int64, (None,), name='action')
         self.reward = tf.placeholder(tf.float32, (None,), name='reward')
-        self.next_state = tf.placeholder(tf.float32, (None,) + STATE_SIZE, name='next_state')
+        self.next_state = tf.placeholder(tf.float32, (None,) + state_size, name='next_state')
         self.done   = tf.placeholder(tf.bool, (None,), name='done')
 
         self.Qvalue = self.get_DQN_prediction(self.state)
+        action_onehot = tf.one_hot(self.action, NUM_ACTIONS, 1.0, 0.0)
+        pred_action_value = tf.reduce_mean(self.Qvalue * action_onehot, 1)
+        with tf.variable_scope('target'):
+            targetQvalue = self.get_DQN_prediction(self.next_state)
+        best_v = tf.reduce_max(targetQvalue, 1)
+        target = self.reward + (1.0 - tf.cast(self.done, tf.float32)) * GAMMA * tf.stop_gradient(best_v)
+        self.cost = tf.truediv(tf.reduce_sum(tf.square(target - pred_action_value)),
+                               tf.cast(BATCH_SIZE, tf.float32), name='cost')
 
     def get_DQN_prediction(self, state):
         """
@@ -23,7 +33,7 @@ class DQN():
         """
         #TODO: Analyze output dimension for each layer
         with tf.variable_scope('CNN1'):
-            W = tf.get_variable('W', [8,8,STATE_SIZE[2],32], initializer=tf.contrib.layers.xavier_initializer_conv2d())
+            W = tf.get_variable('W', [8,8,self.state_size[2],32], initializer=tf.contrib.layers.xavier_initializer_conv2d())
             b = tf.get_variable('b', [32], initializer=tf.constant_initializer())
             conv = tf.nn.conv2d(state, W, strides=[1,4,4,1], padding='SAME', name='conv')
             h = tf.nn.relu(tf.nn.bias_add(conv, b), name="h")
@@ -49,9 +59,6 @@ class DQN():
             output = tf.nn.relu(tf.nn.xw_plus_b(h_f, W, b), name='output')
 
         return tf.identity(output, name='Qvalue')
-
-    def train_one_step(self, data):
-        pass
 
     def load_model(self):
         pass

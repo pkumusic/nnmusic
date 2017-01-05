@@ -9,8 +9,10 @@ import argparse
 import numpy as np
 import cv2
 import random
+from dqn import DQN
 from utils import show_image
 from collections import deque, namedtuple
+import os
 # Cur_observation, the action gonna take, the reward after taking the action, if it's done after the action
 Memory = namedtuple('Memory', ['ob', 'action', 'reward', 'done']) # ob only contain 1 frame for space efficiency
 Exp    = namedtuple('Exp', ['state', 'action', 'reward', 'done', 'next_state']) # state contain histories as training input
@@ -25,27 +27,75 @@ STATE_SIZE = IMAGE_SIZE + (HISTORY_LENGTH,)
 
 random.seed(0)
 
-def train_dqn(env_name, gym_dir):
-    env = gym.make(env_name)
-    #num_action = env.action_space.n
-    env.monitor.start(gym_dir, force=True)
-    # Initialization
-    ob, cur_obs = initialize_env(env)
-    mem = deque(maxlen=REPLAY_MEMORY_SIZE)
-    # Initialize memory with prediction function
-    logger.info("Initialize replay memory")
-    for i in tqdm(xrange(REPLAY_START_SIZE)):
-        action = predict_action(cur_obs)
-        new_ob, reward, done, info = env.step(action)
-        new_ob = preprocess_state(new_ob)
-        cur_obs.append(new_ob)
-        mem.append(Memory(ob, action, reward, done))
-        ob = new_ob
-        if done:
-            ob, cur_obs = initialize_env(env)
+def train_dqn(env_name, gym_dir, out_dir):
 
-    while True:
-        for i in xrange(UPDATE_FREQUENCY):
+    # Initialize tf session and define training ops
+    sess = tf.Session()
+    with sess.as_default():
+        dqn = DQN(STATE_SIZE)
+        global_step = tf.Variable(0, name='global_step', trainable=False)
+        optimizer   = tf.train.AdamOptimizer(1e-4) #learning rate
+        grads_and_vars = optimizer.compute_gradients(dqn.cost)
+        train_op = optimizer.apply_gradients(grads_and_vars=grads_and_vars, global_step=global_step)
+
+        # Keep track of gradient values and sparsity (optional)
+        grad_summaries = []
+        for g, v in grads_and_vars:
+            if g is not None:
+                grad_hist_summary = tf.histogram_summary("{}/grad/hist".format(v.name), g)
+                sparsity_summary = tf.scalar_summary("{}/grad/sparsity".format(v.name), tf.nn.zero_fraction(g))
+                grad_summaries.append(grad_hist_summary)
+                grad_summaries.append(sparsity_summary)
+        grad_summaries_merged = tf.merge_summary(grad_summaries)
+
+        # Output directory for models and summaries
+        logger.info("Writing to {}\n".format(out_dir))
+
+        # Summaries for loss and accuracy
+        loss_summary = tf.scalar_summary("loss", dqn.cost)
+
+        summary_op = tf.merge_summary([loss_summary, grad_summaries_merged])
+        summary_writer = tf.train.SummaryWriter(out_dir, sess.graph)
+
+        # Checkpoint directory. Tensorflow assumes this directory already exists so we need to create it
+        checkpoint_dir = os.path.abspath(os.path.join(out_dir, "checkpoints"))
+        checkpoint_prefix = os.path.join(checkpoint_dir, "model")
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
+        saver = tf.train.Saver(tf.all_variables())
+
+        # Initialize all variables
+        sess.run(tf.initialize_all_variables())
+        def train_one_step(batch):
+            state = np.array([e.state for e in batch]) / 255.0
+            action = np.array([e.action for e in batch])
+            reward = np.array([e.reward for e in batch])
+            done = np.array([e.done for e in batch])
+            next_state = np.array([e.next_state for e in batch]) / 255.0
+            feed_dict = {
+                dqn.state: state,
+                dqn.action: action,
+                dqn.reward: reward,
+                dqn.done: done,
+                dqn.next_state: next_state,
+            }
+            _, step, summaries, cost = sess.run(
+                [train_op, global_step, summary_op, dqn.cost],
+                feed_dict=feed_dict)
+
+            #logger.info("step {}, cost {:g}".format(step, cost))
+            summary_writer.add_summary(summaries, step)
+
+
+        env = gym.make(env_name)
+        #num_action = env.action_space.n
+        env.monitor.start(gym_dir, force=True)
+        # Initialization
+        ob, cur_obs = initialize_env(env)
+        mem = deque(maxlen=REPLAY_MEMORY_SIZE)
+        # Initialize memory with prediction function
+        logger.info("Initialize replay memory")
+        for i in tqdm(xrange(REPLAY_START_SIZE)):
             action = predict_action(cur_obs)
             new_ob, reward, done, info = env.step(action)
             new_ob = preprocess_state(new_ob)
@@ -54,8 +104,23 @@ def train_dqn(env_name, gym_dir):
             ob = new_ob
             if done:
                 ob, cur_obs = initialize_env(env)
-        batch = sample(mem, MINIBATCH_SIZE, HISTORY_LENGTH)
-        train_one_step(batch)
+
+        while True:
+            for i in xrange(UPDATE_FREQUENCY):
+                action = predict_action(cur_obs)
+                new_ob, reward, done, info = env.step(action)
+                new_ob = preprocess_state(new_ob)
+                cur_obs.append(new_ob)
+                mem.append(Memory(ob, action, reward, done))
+                ob = new_ob
+                if done:
+                    ob, cur_obs = initialize_env(env)
+            batch = sample(mem, MINIBATCH_SIZE, HISTORY_LENGTH)
+            train_one_step(batch)
+            current_step = tf.train.global_step(sess, global_step)
+            if current_step % 1000 == 0:
+                path = saver.save(sess, checkpoint_prefix, global_step=current_step)
+                logger.info("Saved model checkpoint to {}\n".format(path))
 
 def initialize_env(env):
     """ Initialize a history queue and add first ob to the queue
@@ -69,8 +134,7 @@ def initialize_env(env):
     return ob, cur_obs
 
 
-def train_one_step(batch):
-    pass
+
 
 
 def preprocess_state(ob, debug=False):
@@ -109,6 +173,7 @@ def sample(mem, batch_size, history_length):
                 next_state[:,:,:j] = 0
                 break
         data.append(Exp(state, action, reward, done, next_state))
+
     return data
 
 def gym_test(env_name):
@@ -153,4 +218,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     #gym_test(args.env)
-    train_dqn(args.env, 'tmp')
+    train_dqn(args.env, 'tmp', 'tmp_model')
