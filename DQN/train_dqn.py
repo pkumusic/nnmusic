@@ -21,11 +21,13 @@ REPLAY_START_SIZE = 10
 HISTORY_LENGTH = 4
 MINIBATCH_SIZE = 32
 UPDATE_FREQUENCY = 4
+STATE_SIZE = IMAGE_SIZE + (HISTORY_LENGTH,)
 
 random.seed(0)
 
 def train_dqn(env_name, gym_dir):
     env = gym.make(env_name)
+    #num_action = env.action_space.n
     env.monitor.start(gym_dir, force=True)
     # Initialization
     ob, cur_obs = initialize_env(env)
